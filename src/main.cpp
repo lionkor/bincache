@@ -1,12 +1,22 @@
-#include <asio/ip/address.hpp>
+#include "asio/static_thread_pool.hpp"
+#include "asio/thread_pool.hpp"
 #include <asio/io_context.hpp>
+#include <asio/ip/address.hpp>
 #include <asio/ip/tcp.hpp>
 #include <spdlog/spdlog.h>
+#include <stop_token>
+#include <thread>
 
 using namespace asio;
 
-void handle_client() {
+void handle(ip::tcp::socket& client) {
+    std::error_code ec;
+    client.write_some(asio::buffer("HTTP/1.0 200 OK\r\n\r\n"));
 
+    ec = client.close(ec);
+    if (ec) {
+        spdlog::debug("Failed to close (not an error): {}", ec.message());
+    }
 }
 
 int main(int argc, char** argv) {
@@ -14,24 +24,27 @@ int main(int argc, char** argv) {
     (void)argv;
 
     asio::io_context io;
+    ip::tcp::acceptor acceptor(io, ip::tcp::endpoint(ip::make_address("127.0.0.1"), 3900));
 
-    auto ep = ip::tcp::endpoint(ip::make_address("127.0.0.1"), 3900);
-    auto acceptor = ip::tcp::acceptor(io, ep);
     asio::error_code ec;
-    ec = acceptor.set_option(asio::ip::tcp::acceptor::reuse_address(true), ec);
-    if (ec) {
-        // ignore if this fails, just warn
+    ec = acceptor.set_option(ip::tcp::acceptor::reuse_address(true), ec);
+    if (ec)
         spdlog::warn("Failed to set REUSEADDR, ignoring");
-    }
 
-    ec = acceptor.listen(socket_base::max_listen_connections, ec);
-    if (ec) {
-        spdlog::error("Failed to listen on {}: {}", ep.address().to_string(), ec.message());
-        return 1;
-    }
-
+    acceptor.listen();
     spdlog::info("Listening on [{}]:{}", acceptor.local_endpoint().address().to_string(), acceptor.local_endpoint().port());
 
-    ip::tcp::endpoint client_ep;
-    //acceptor.async_accept(ep, handle_client);
+    asio::thread_pool worker_pool(8);
+
+    while (true) {
+        ip::tcp::socket client(io);
+        ec = acceptor.accept(client, ec);
+
+        if (ec) {
+            spdlog::error("Accept failed: {}", ec.message());
+            continue;
+        }
+
+        asio::post(worker_pool, [client = std::move(client)] mutable { handle(client); });
+    }
 }

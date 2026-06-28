@@ -3,6 +3,9 @@ build/
 bin/
 bin-rel/
 build-rel/
+callgrind.out.*
+perf.data
+vgcore.*
 
 # agents only used for scripts and dependency management, still they need instructions :D
 AGENTS.md
