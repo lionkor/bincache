@@ -1,21 +1,161 @@
-#include "asio/static_thread_pool.hpp"
-#include "asio/thread_pool.hpp"
+#include "cache.hpp"
+#include "defer.hpp"
+#include <absl/container/flat_hash_map.h>
+#include <algorithm>
+#include <asio/error_code.hpp>
 #include <asio/io_context.hpp>
 #include <asio/ip/address.hpp>
 #include <asio/ip/tcp.hpp>
+#include <asio/read.hpp>
+#include <asio/socket_base.hpp>
+#include <asio/thread_pool.hpp>
+#include <asio/write.hpp>
+#include <bit>
+#include <chrono>
+#include <cstring>
+#include <shared_mutex>
+#include <span>
 #include <spdlog/spdlog.h>
-#include <stop_token>
-#include <thread>
+#include <string_view>
+#include <utility>
 
 using namespace asio;
 
-void handle(ip::tcp::socket& client) {
-    std::error_code ec;
-    client.write_some(asio::buffer("HTTP/1.0 200 OK\r\n\r\n"));
 
+// Because we're SO nice!!!
+void gracefully_close(ip::tcp::socket& client) {
+    asio::error_code ec;
+    ec = client.shutdown(asio::socket_base::shutdown_both, ec);
+    if (ec) {
+        spdlog::debug("Failed to shutdown (not an error): {}", ec.message());
+    }
     ec = client.close(ec);
     if (ec) {
         spdlog::debug("Failed to close (not an error): {}", ec.message());
+    }
+}
+
+static constexpr size_t OPERATION_SIZE = 3;
+static constexpr size_t MAX_CONCURRENCY = 8;
+static constexpr size_t KEY_HEADER_SIZE = sizeof(uint16_t);
+static constexpr size_t VALUE_HEADER_SIZE = sizeof(uint32_t);
+static constexpr std::array<std::byte, OPERATION_SIZE> OPERATION_GET = { std::byte('G'), std::byte('E'), std::byte('T') };
+static constexpr std::array<std::byte, OPERATION_SIZE> OPERATION_PUT = { std::byte('P'), std::byte('U'), std::byte('T') };
+
+static BinCache s_cache{};
+
+// Format:
+// 0. The operation "GET" or "PUT" without the terminating null byte
+// 1. A 2-byte unsigned int, little endian, denoting the key size
+// 2. Key as a byte[] of length read from 1.
+// 3. For PUT, a 4-byte unsigned int, little endian, denoting data size
+// 4. For PUT, data of size read from 3.
+void handle(ip::tcp::socket& client) {
+    const DeferredAction defer_graceful_close([&client] { gracefully_close(client); });
+
+    std::error_code ec;
+
+    std::array<std::byte, OPERATION_SIZE + KEY_HEADER_SIZE> header;
+    asio::read(client, asio::buffer(header), ec);
+    if (ec) {
+        // this isn't "malformed packet" because we're not sure it's even a
+        // whole packet, so we just say we failed
+        spdlog::error("Failed to read header: {}", ec.message());
+        return;
+    }
+
+    spdlog::debug("read {} bytes of header", header.size());
+
+    const auto operation = std::span<std::byte, OPERATION_SIZE>(header.begin(), header.begin() + OPERATION_SIZE);
+    const auto key_size_header = std::span<std::byte, KEY_HEADER_SIZE>(header.begin() + OPERATION_SIZE, header.begin() + OPERATION_SIZE + KEY_HEADER_SIZE);
+
+    // we only care if it is PUT or not.
+    bool is_put = std::equal(OPERATION_PUT.begin(), OPERATION_PUT.end(), operation.begin(), operation.end());
+
+    uint16_t key_size { 0 };
+    static_assert(sizeof(key_size) == key_size_header.size(), "key size buffer has the wrong byte count");
+    std::memcpy(&key_size, key_size_header.data(), sizeof(key_size));
+
+    if constexpr (std::endian::native == std::endian::big) {
+        // do a little swapping
+        key_size = std::byteswap(key_size);
+    }
+
+    std::vector<std::byte> key(key_size);
+    asio::read(client, asio::buffer(key), ec);
+    if (ec) {
+        spdlog::error("Malformed packet: Failed to read {} key bytes: {}", key_size, ec.message());
+        return;
+    }
+
+    if (is_put) {
+        std::array<std::byte, VALUE_HEADER_SIZE> value_size_header;
+        asio::read(client, asio::buffer(value_size_header), ec);
+        if (ec) {
+            spdlog::error("Malformed packet: Failed to read value size header: {}", ec.message());
+            return;
+        }
+
+        uint32_t value_size;
+        static_assert(sizeof(value_size) == value_size_header.size(), "key size buffer has the wrong byte count");
+        std::memcpy(&value_size, value_size_header.data(), sizeof(value_size));
+
+        if constexpr (std::endian::native == std::endian::big) {
+            // do a little swapping
+            value_size = std::byteswap(value_size);
+        }
+
+        std::vector<std::byte> value(value_size);
+        asio::read(client, asio::buffer(value), ec);
+        if (ec) {
+            spdlog::error("Malformed packet: Failed to read value: {}", ec.message());
+            return;
+        }
+
+        // PERF: these are two copies, key can be moved if needed
+        s_cache.put(key, value);
+
+        spdlog::info("Put {} bytes for key \"{}\"", value_size, std::string_view(reinterpret_cast<char*>(key.data()), key.size()));
+        // for PUT and GET we return the cached value
+
+        // write the same header, no need to recompute it
+        asio::write(client, asio::buffer(value_size_header), ec);
+        if (ec) {
+            spdlog::error("Failed to write value size header back after PUT: {}", ec.message());
+            return;
+        }
+        // write the value akin to get
+        asio::write(client, asio::buffer(value), ec);
+        if (ec) {
+            spdlog::error("Failed to write value back after PUT: {}", ec.message());
+            return;
+        }
+
+    } else {
+        // GET
+
+        // PERF: This is the copying variant.
+        auto maybe_data = s_cache.get_copy(key);
+        if (maybe_data.has_value()) {
+            uint32_t data_size = maybe_data.value().size();
+
+            if (std::endian::native == std::endian::big) {
+                // swap to LE :^)
+                data_size = std::byteswap(data_size);
+            }
+
+            asio::write(client, asio::buffer(reinterpret_cast<std::byte*>(&data_size), sizeof(data_size)), ec);
+            if (ec) {
+                spdlog::error("Failed to write value size header: {}", ec.message());
+                return;
+            }
+
+            asio::write(client, asio::buffer(maybe_data.value()), ec);
+            if (ec) {
+                spdlog::error("Failed to write value: {}", ec.message());
+                return;
+            }
+        }
     }
 }
 
@@ -34,7 +174,7 @@ int main(int argc, char** argv) {
     acceptor.listen();
     spdlog::info("Listening on [{}]:{}", acceptor.local_endpoint().address().to_string(), acceptor.local_endpoint().port());
 
-    asio::thread_pool worker_pool(8);
+    asio::thread_pool worker_pool(MAX_CONCURRENCY);
 
     while (true) {
         ip::tcp::socket client(io);
@@ -45,6 +185,7 @@ int main(int argc, char** argv) {
             continue;
         }
 
+        // this is ~25% faster than just calling handle() directly here.
         asio::post(worker_pool, [client = std::move(client)] mutable { handle(client); });
     }
 }

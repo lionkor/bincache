@@ -4,3 +4,9 @@
 [submodule "vendor/spdlog"]
 	path = vendor/spdlog
 	url = https://github.com/gabime/spdlog.git
+[submodule "vendor/abseil-cpp"]
+	path = vendor/abseil-cpp
+	url = https://github.com/abseil/abseil-cpp.git
+[submodule "vendor/arena-allocator"]
+	path = vendor/arena-allocator
+	url = https://github.com/ccgargantua/arena-allocator
