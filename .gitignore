@@ -1,0 +1,8 @@
+core.*
+build/
+bin/
+bin-rel/
+build-rel/
+
+# agents only used for scripts and dependency management, still they need instructions :D
+AGENTS.md
