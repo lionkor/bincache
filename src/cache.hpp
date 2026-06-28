@@ -3,17 +3,20 @@
 #include "consts.hpp"
 #include <absl/container/flat_hash_map.h>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <shared_mutex>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 using CacheKey = std::vector<std::byte>;
 using CacheEntry = std::vector<std::byte>;
 
 template <typename H>
-H AbslHashValue(H h, const CacheKey& key) {
-    return H::combine_contiguous(std::move(h), key.data(), key.size());
+H AbslHashValue(H hashable, const CacheKey& key) {
+    return H::combine_contiguous(std::move(hashable), key.data(), key.size());
 }
 
 template <typename T>
@@ -44,7 +47,7 @@ struct CacheConfig final {
     std::optional<std::chrono::steady_clock::duration> max_age = std::nullopt;
 };
 
-enum class PutStatus {
+enum class PutStatus : uint8_t {
     Ok,
     Error_TotalSizeExceeded,
     Error_TotalCountExceeded,
@@ -71,7 +74,7 @@ public:
     PutStatus put(std::vector<std::byte> key, std::vector<std::byte> value) noexcept;
 
 private:
-    absl::flat_hash_map<CacheKey, CacheEntry> _cache { };
+    absl::flat_hash_map<CacheKey, CacheEntry> _cache;
     mutable std::shared_mutex _cache_mtx;
     CacheConfig _config;
 

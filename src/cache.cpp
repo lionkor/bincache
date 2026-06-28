@@ -1,7 +1,12 @@
 #include "cache.hpp"
 #include "spdlog/spdlog.h"
+#include <cstddef>
 #include <limits>
 #include <mutex>
+#include <optional>
+#include <shared_mutex>
+#include <utility>
+#include <vector>
 
 [[nodiscard]]
 std::optional<std::vector<std::byte>> BinCache::get_copy(const std::vector<std::byte>& key) {

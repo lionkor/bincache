@@ -1,3 +1,42 @@
 CompileFlags:
   CompilationDatabase: bin/
   Remove: [-fdeps-format=p1689r5]
+Diagnostics:
+  MissingIncludes: Strict
+  UnusedIncludes: Strict
+  Includes:
+    AnalyzeAngledIncludes: true
+    IgnoreHeader:
+      - ".*/.inc"
+      - ".*_generated/.h"
+      - ".*/asio/impl/.*"
+      - "asio/impl/.*"
+  ClangTidy:
+    Add:
+      - bugprone-*
+      - performance-*
+      - portability-*
+      - modernize-*
+      - readability-*
+      - cppcoreguidelines-*
+    Remove:
+      - modernize-use-trailing-return-type
+      - readability-magic-numbers
+      - cppcoreguidelines-avoid-magic-numbers
+      - cppcoreguidelines-avoid-const-or-ref-data-members
+      - cppcoreguidelines-non-private-member-variables-in-classes
+      - readability-identifier-length
+      #- cppcoreguidelines-pro-bounds-array-to-pointer-decay
+      #- cppcoreguidelines-pro-type-vararg
+    FastCheckFilter: Loose
+Index:
+  Background: Build
+  StandardLibrary: true
+Style:
+  QuotedHeaders: "^(src|include)/.*"
+  AngledHeaders:
+    - "^(third_party|external)/.*"
+    - ".*"
+SemanticTokens:
+  DisabledKinds: []
+  DisabledModifiers: []

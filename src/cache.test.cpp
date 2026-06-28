@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <vector>
 
 TEST(BinCacheTest, PutAndGetCopy) {
     BinCache cache;
@@ -15,7 +16,7 @@ TEST(BinCacheTest, PutAndGetCopy) {
         std::byte { 'w' }, std::byte { 'o' }, std::byte { 'r' }, std::byte { 'l' }, std::byte { 'd' }
     };
 
-    cache.put(key, value);
+    (void)cache.put(key, value);
     EXPECT_EQ(cache.item_count(), 1);
 
     auto result = cache.get_copy(key);
