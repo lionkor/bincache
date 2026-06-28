@@ -12,8 +12,10 @@ set(CMAKE_CXX_FLAGS_RELEASE "-Wall -Wextra -O3 -flto -march=native -ggdb")
 add_subdirectory(vendor)
 
 add_executable(${PROJECT_NAME}
-    src/main.cpp
+    src/cache.cpp
+    src/cache.hpp
     src/defer.hpp
+    src/main.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE vendor/asio/include)

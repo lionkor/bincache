@@ -115,7 +115,7 @@ void handle(ip::tcp::socket& client) {
         // PERF: these are two copies, key can be moved if needed
         s_cache.put(key, value);
 
-        spdlog::info("Put {} bytes for key \"{}\"", value_size, std::string_view(reinterpret_cast<char*>(key.data()), key.size()));
+        //spdlog::info("Put {} bytes for key \"{}\"", value_size, std::string_view(reinterpret_cast<char*>(key.data()), key.size()));
         // for PUT and GET we return the cached value
 
         // write the same header, no need to recompute it
