@@ -1,9 +1,8 @@
 #pragma once
 
-#include "spdlog/spdlog.h"
+#include "consts.hpp"
 #include <absl/container/flat_hash_map.h>
-#include <exception>
-#include <mutex>
+#include <chrono>
 #include <optional>
 #include <shared_mutex>
 #include <stdexcept>
@@ -33,24 +32,50 @@ private:
     std::shared_lock<std::shared_mutex> _lock;
 };
 
+using namespace consts::sizes;
+struct CacheConfig final {
+    size_t max_total_size_bytes = 1 * GiB;
+    size_t max_elements = 10'000;
+    // CONTINUE: Set this back to false, change main to call `get` instead of `get_copy` and
+    // see if that changes performance characteristics
+    bool put_despite_limits = false;
+
+    // TODO
+    std::optional<std::chrono::steady_clock::duration> max_age = std::nullopt;
+};
+
+enum class PutStatus {
+    Ok,
+    Error_TotalSizeExceeded,
+    Error_TotalCountExceeded,
+};
+
 class BinCache final {
 public:
-    size_t item_count() noexcept {
-        std::shared_lock lock(s_cache_mtx);
-        return s_cache.size();
+    explicit BinCache(const CacheConfig& config = { })
+        : _config(config) { }
+
+    size_t item_count() const noexcept {
+        std::shared_lock lock(_cache_mtx);
+        return _cache.size();
     }
 
     [[nodiscard]]
     std::optional<std::vector<std::byte>> get_copy(const std::vector<std::byte>& key);
 
+    // CAREFUL: As the type indicates, this holds a READ lock on the cache.
     [[nodiscard]]
     std::optional<ReadLocked<std::vector<std::byte>>> get(const std::vector<std::byte>& key);
 
-    void put(std::vector<std::byte> key, std::vector<std::byte> value) noexcept;
+    [[nodiscard]]
+    PutStatus put(std::vector<std::byte> key, std::vector<std::byte> value) noexcept;
 
 private:
-    absl::flat_hash_map<CacheKey, CacheEntry> s_cache { };
-    std::shared_mutex s_cache_mtx;
+    absl::flat_hash_map<CacheKey, CacheEntry> _cache { };
+    mutable std::shared_mutex _cache_mtx;
+    CacheConfig _config;
+
+    size_t _total_values_size = 0;
 };
 
 class TwoGenCache final {

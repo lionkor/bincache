@@ -3,6 +3,8 @@ set(CMAKE_CXX_COMPILER clang++)
 
 project(bincache LANGUAGES CXX C)
 
+include(CTest)
+
 set(CMAKE_CXX_FLAGS_DEBUG "-Wall -Wextra --pedantic -O0 -ggdb")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 26)
@@ -20,3 +22,15 @@ add_executable(${PROJECT_NAME}
 
 target_include_directories(${PROJECT_NAME} PRIVATE vendor/asio/include)
 target_link_libraries(${PROJECT_NAME} PRIVATE spdlog absl::flat_hash_map)
+
+# --- tests ---
+
+add_executable(${PROJECT_NAME}_tests
+    src/cache.cpp
+    src/cache.test.cpp
+)
+target_include_directories(${PROJECT_NAME}_tests PRIVATE vendor/asio/include)
+target_link_libraries(${PROJECT_NAME}_tests PRIVATE spdlog absl::flat_hash_map GTest::gtest_main)
+
+include(GoogleTest)
+gtest_discover_tests(${PROJECT_NAME}_tests)

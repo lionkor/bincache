@@ -17,3 +17,7 @@ target_compile_definitions(spdlog PUBLIC SPDLOG_COMPILED_LIB)
 #)
 #target_include_directories(spdlog PUBLIC arena-allocator/)
 #target_compile_definitions(arena_allocator PUBLIC ARENA_IMPLEMENTATION)
+
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
+add_subdirectory(googletest)

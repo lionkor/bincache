@@ -113,7 +113,16 @@ void handle(ip::tcp::socket& client) {
         }
 
         // PERF: these are two copies, key can be moved if needed
-        s_cache.put(key, value);
+        PutStatus status = s_cache.put(key, value);
+        switch (status) {
+        case PutStatus::Ok:
+            // nice!
+            break;
+        case PutStatus::Error_TotalSizeExceeded:
+            break;
+        case PutStatus::Error_TotalCountExceeded:
+            break;
+        }
 
         //spdlog::info("Put {} bytes for key \"{}\"", value_size, std::string_view(reinterpret_cast<char*>(key.data()), key.size()));
         // for PUT and GET we return the cached value

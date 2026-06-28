@@ -10,3 +10,6 @@
 [submodule "vendor/arena-allocator"]
 	path = vendor/arena-allocator
 	url = https://github.com/ccgargantua/arena-allocator
+[submodule "vendor/googletest"]
+	path = vendor/googletest
+	url = https://github.com/google/googletest.git
