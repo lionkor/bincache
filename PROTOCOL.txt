@@ -1,6 +1,16 @@
 BINCACHE PROTOCOL
 
-Version: 1.0.0 Date: 2026-06-29 Repository: https://github.com/lionkor/bincache
+Version:        1.0
+Date:           2026-06-29
+Authors:        Lion Kortlepel <development@kortlepel.com>
+Ref. Impl.:     https://github.com/lionkor/bincache
+
+0. Purpose
+
+Bincache is a protocol and reference implementation of a key-value cache for raw
+binary data of up to 4GiB per key, and key sizes up to 65KiB. The reference
+implementation and protocol are designed for reasonably high performance and low
+latency.
 
 1. Transport
 
