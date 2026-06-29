@@ -1,9 +1,10 @@
 BINCACHE PROTOCOL
 
-Version:        1.0
-Date:           2026-06-29
-Authors:        Lion Kortlepel <development@kortlepel.com>
-Ref. Impl.:     https://github.com/lionkor/bincache
+Version:            1.0
+Last Update:        2026-06-29
+Authors:            Lion Kortlepel <development@kortlepel.com>
+Ref. Impl.:         https://github.com/lionkor/bincache
+Initial Release:    2026-06-29
 
 0. Purpose
 
