@@ -16,8 +16,10 @@ add_subdirectory(vendor)
 add_executable(${PROJECT_NAME}
     src/cache.cpp
     src/cache.hpp
+    src/consts.hpp
     src/defer.hpp
     src/main.cpp
+    src/ndi_array.hpp
 )
 
 target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra --pedantic)
@@ -30,7 +32,7 @@ add_executable(${PROJECT_NAME}_tests
     src/cache.cpp
     src/cache.test.cpp
 )
-target_compile_options(${PROJECT_NAME}_tests PRIVATE -Wall -Wextra --pedantic)
+target_compile_options(${PROJECT_NAME}_tests PRIVATE -Wall -Wextra --pedantic -fdiagnostics-color=always)
 target_include_directories(${PROJECT_NAME}_tests PRIVATE vendor/asio/include)
 target_link_libraries(${PROJECT_NAME}_tests PRIVATE spdlog absl::flat_hash_map GTest::gtest_main)
 

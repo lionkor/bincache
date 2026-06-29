@@ -1,4 +1,6 @@
 #include "cache.hpp"
+#include "consts.hpp"
+#include "ndi_array.hpp"
 #include "spdlog/spdlog.h"
 #include <cstddef>
 #include <limits>
@@ -9,33 +11,31 @@
 #include <vector>
 
 [[nodiscard]]
-std::optional<std::vector<std::byte>> BinCache::get_copy(const std::vector<std::byte>& key) {
+std::optional<NdiArray<std::byte>> BinCache::get_copy(const std::vector<std::byte>& key) {
     std::shared_lock lock(_cache_mtx);
     if (_cache.contains(key)) {
         return _cache.at(key);
-    } else {
-        return std::nullopt;
     }
+    return std::nullopt;
 }
 
 [[nodiscard]]
-std::optional<ReadLocked<std::vector<std::byte>>> BinCache::get(const std::vector<std::byte>& key) {
+std::optional<ReadLocked<NdiArray<std::byte>>> BinCache::get(const std::vector<std::byte>& key) {
     std::shared_lock lock(_cache_mtx);
     if (_cache.contains(key)) {
-        return ReadLocked<std::vector<std::byte>>(std::move(lock), _cache.at(key));
-    } else {
-        return std::nullopt;
+        return ReadLocked<NdiArray<std::byte>>(std::move(lock), _cache.at(key));
     }
+    return std::nullopt;
 }
 
-PutStatus BinCache::put(std::vector<std::byte> key, std::vector<std::byte> value) noexcept {
+PutStatus BinCache::put(std::vector<std::byte> key, NdiArray<std::byte> value) noexcept {
     PutStatus status = PutStatus::Ok;
 
     // Error_TotalSizeExceeded check
     if (_config.max_total_size_bytes != std::numeric_limits<size_t>::max()
         && _total_values_size + value.size() > _config.max_total_size_bytes) {
         spdlog::error("Total max size configured ({} MiB) reached, tried to add element of size {} which would exceed the threshold (blocking PUT? {})",
-            double(_config.max_total_size_bytes) / double(MiB),
+            static_cast<double>(_config.max_total_size_bytes) / static_cast<double>(MiB),
             value.size(),
             _config.put_despite_limits ? "no" : "yes");
         status = PutStatus::Error_TotalSizeExceeded;

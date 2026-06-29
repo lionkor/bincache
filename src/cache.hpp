@@ -1,6 +1,7 @@
 #pragma once
 
 #include "consts.hpp"
+#include "ndi_array.hpp"
 #include <absl/container/flat_hash_map.h>
 #include <chrono>
 #include <cstddef>
@@ -12,7 +13,7 @@
 #include <vector>
 
 using CacheKey = std::vector<std::byte>;
-using CacheEntry = std::vector<std::byte>;
+using CacheEntry = NdiArray<std::byte>;
 
 template <typename H>
 H AbslHashValue(H hashable, const CacheKey& key) {
@@ -21,24 +22,39 @@ H AbslHashValue(H hashable, const CacheKey& key) {
 
 template <typename T>
 struct ReadLocked final {
-    const T& value;
-
     explicit ReadLocked(std::shared_lock<std::shared_mutex>&& lock, const T& value)
-        : value(value)
+        : _value(value)
         , _lock(std::move(lock)) {
         if (!_lock.owns_lock()) {
             throw std::logic_error("Lock must be owned & locked for ReadLocked to take it");
         }
     }
 
+    // UNSAFE: Only call in extremely clear circumstances
+    void force_unlock() {
+        _force_unlocked = true;
+        _lock.unlock();
+        // turn dtor into noop
+        _lock = { };
+    }
+
+    const T& value() {
+        if (_force_unlocked) {
+            throw std::logic_error("Force-unlocked ReadLock's value shall never be accessed");
+        }
+        return _value;
+    }
+
 private:
+    const T& _value;
     std::shared_lock<std::shared_mutex> _lock;
+    bool _force_unlocked { false };
 };
 
 using namespace consts::sizes;
 struct CacheConfig final {
     size_t max_total_size_bytes = 1 * GiB;
-    size_t max_elements = 10'000;
+    size_t max_elements = 1'000'000;
     // CONTINUE: Set this back to false, change main to call `get` instead of `get_copy` and
     // see if that changes performance characteristics
     bool put_despite_limits = false;
@@ -64,14 +80,14 @@ public:
     }
 
     [[nodiscard]]
-    std::optional<std::vector<std::byte>> get_copy(const std::vector<std::byte>& key);
+    std::optional<NdiArray<std::byte>> get_copy(const std::vector<std::byte>& key);
 
     // CAREFUL: As the type indicates, this holds a READ lock on the cache.
     [[nodiscard]]
-    std::optional<ReadLocked<std::vector<std::byte>>> get(const std::vector<std::byte>& key);
+    std::optional<ReadLocked<NdiArray<std::byte>>> get(const std::vector<std::byte>& key);
 
     [[nodiscard]]
-    PutStatus put(std::vector<std::byte> key, std::vector<std::byte> value) noexcept;
+    PutStatus put(std::vector<std::byte> key, NdiArray<std::byte> value) noexcept;
 
 private:
     absl::flat_hash_map<CacheKey, CacheEntry> _cache;

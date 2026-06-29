@@ -1,5 +1,7 @@
 #include "cache.hpp"
+#include "consts.hpp"
 #include "defer.hpp"
+#include "ndi_array.hpp"
 #include <algorithm>
 #include <array>
 #include <asio/buffer.hpp>
@@ -9,9 +11,9 @@
 #include <asio/ip/tcp.hpp>
 #include <asio/post.hpp>
 #include <asio/read.hpp> // IWYU pragma: keep
-#include <asio/write.hpp> // IWYU pragma: keep
 #include <asio/socket_base.hpp>
 #include <asio/thread_pool.hpp>
+#include <asio/write.hpp> // IWYU pragma: keep
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -49,9 +51,12 @@ static BinCache s_cache { };
 static inline void do_get(ip::tcp::socket& client, std::vector<std::byte>& key) {
     asio::error_code ec;
     // PERF: This is the copying variant.
-    auto maybe_data = s_cache.get_copy(key);
+    auto maybe_data = s_cache.get(key);
     if (maybe_data.has_value()) {
-        uint32_t data_size = maybe_data.value().size();
+        uint32_t data_size = maybe_data.value().value().size();
+
+        // at >= X MiB, we dont hold the lock while sending anymores
+        bool is_large = data_size > 200 * MiB;
 
         if (std::endian::native == std::endian::big) {
             // swap to LE :^)
@@ -68,24 +73,39 @@ static inline void do_get(ip::tcp::socket& client, std::vector<std::byte>& key) 
             return;
         }
 
-        asio::write(client, asio::buffer(maybe_data.value()), ec);
-        if (ec) {
-            spdlog::error("Failed to write value: {}", ec.message());
-            return;
+        if (is_large) {
+            // TODO: The threshold should be tuneable from a config.
+            spdlog::debug("Copying data out for large data to avoid locking too long");
+            NdiArray<std::byte> copy = maybe_data.value().value();
+            // force unlock here is safe because we copied the data out and will not access it again
+            maybe_data.value().force_unlock();
+            // important: we use the copy here.
+            asio::write(client, asio::buffer(copy.data(), copy.size()), ec);
+            if (ec) {
+                spdlog::error("Failed to write value: {}", ec.message());
+                return;
+            }
+        } else {
+            const auto& val = maybe_data.value().value();
+            asio::write(client, asio::buffer(val.data(), val.size()), ec);
+            if (ec) {
+                spdlog::error("Failed to write value: {}", ec.message());
+                return;
+            }
         }
     }
 }
 
 static inline void do_put(ip::tcp::socket& client, std::vector<std::byte>& key) {
     asio::error_code ec;
-    std::array<std::byte, VALUE_HEADER_SIZE> value_size_header{};
+    std::array<std::byte, VALUE_HEADER_SIZE> value_size_header { };
     asio::read(client, asio::buffer(value_size_header), ec);
     if (ec) {
         spdlog::error("Malformed packet: Failed to read value size header: {}", ec.message());
         return;
     }
 
-    uint32_t value_size{};
+    uint32_t value_size { };
     static_assert(sizeof(value_size) == value_size_header.size(), "key size buffer has the wrong byte count");
     std::memcpy(&value_size, value_size_header.data(), sizeof(value_size));
 
@@ -94,8 +114,8 @@ static inline void do_put(ip::tcp::socket& client, std::vector<std::byte>& key) 
         value_size = std::byteswap(value_size);
     }
 
-    std::vector<std::byte> value(value_size);
-    asio::read(client, asio::buffer(value), ec);
+    NdiArray<std::byte> value(value_size);
+    asio::read(client, asio::buffer(value.data(), value_size), ec);
     if (ec) {
         spdlog::error("Malformed packet: Failed to read value: {}", ec.message());
         return;
@@ -108,9 +128,9 @@ static inline void do_put(ip::tcp::socket& client, std::vector<std::byte>& key) 
         // nice!
         break;
     case PutStatus::Error_TotalSizeExceeded:
-        break;
+        break; // TODO: Handle
     case PutStatus::Error_TotalCountExceeded:
-        break;
+        break; // TODO: Handle
     }
 
     // spdlog::info("Put {} bytes for key \"{}\"", value_size, std::string_view(reinterpret_cast<char*>(key.data()), key.size()));
@@ -123,7 +143,7 @@ static inline void do_put(ip::tcp::socket& client, std::vector<std::byte>& key) 
         return;
     }
     // write the value akin to get
-    asio::write(client, asio::buffer(value), ec);
+    asio::write(client, asio::buffer(value.data(), value.size()), ec);
     if (ec) {
         spdlog::error("Failed to write value back after PUT: {}", ec.message());
         return;
@@ -141,7 +161,7 @@ void handle(ip::tcp::socket& client) {
 
     std::error_code ec;
 
-    std::array<std::byte, OPERATION_SIZE + KEY_HEADER_SIZE> header{};
+    std::array<std::byte, OPERATION_SIZE + KEY_HEADER_SIZE> header { };
     asio::read(client, asio::buffer(header), ec);
     if (ec) {
         // this isn't "malformed packet" because we're not sure it's even a
@@ -149,8 +169,6 @@ void handle(ip::tcp::socket& client) {
         spdlog::error("Failed to read header: {}", ec.message());
         return;
     }
-
-    spdlog::debug("read {} bytes of header", header.size());
 
     const auto operation = std::span<std::byte, OPERATION_SIZE>(header.begin(), header.begin() + OPERATION_SIZE);
     const auto key_size_header = std::span<std::byte, KEY_HEADER_SIZE>(header.begin() + OPERATION_SIZE, header.begin() + OPERATION_SIZE + KEY_HEADER_SIZE);

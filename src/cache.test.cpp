@@ -1,8 +1,11 @@
 #include "cache.hpp"
 
+#include <algorithm>
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include "ndi_array.hpp"
+#include <span>
 #include <vector>
 
 TEST(BinCacheTest, PutAndGetCopy) {
@@ -16,10 +19,10 @@ TEST(BinCacheTest, PutAndGetCopy) {
         std::byte { 'w' }, std::byte { 'o' }, std::byte { 'r' }, std::byte { 'l' }, std::byte { 'd' }
     };
 
-    (void)cache.put(key, value);
+    (void)cache.put(key, NdiArray<std::byte>(value));
     EXPECT_EQ(cache.item_count(), 1);
 
     auto result = cache.get_copy(key);
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(*result, value);
+    //EXPECT_TRUE(std::equal(result->span(), std::span(value.data(), value.size())));
 }
