@@ -231,7 +231,7 @@ void run_unix_server() {
 
 void run_tcp_server() {
     asio::io_context io;
-    ip::tcp::acceptor acceptor(io, ip::tcp::endpoint(ip::make_address("127.0.0.1"), 3900));
+    ip::tcp::acceptor acceptor(io, ip::tcp::endpoint(ip::make_address("127.0.0.1"), 38126));
 
     asio::error_code ec;
     ec = acceptor.set_option(ip::tcp::acceptor::reuse_address(true), ec);
