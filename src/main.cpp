@@ -128,36 +128,9 @@ static inline void do_put(basic_stream_socket<T>& client, std::vector<std::byte>
         return;
     }
 
-    // PERF: these are two copies, key can be moved if needed
     PutStatus status = s_cache.put(std::move(key), std::move(value));
-    switch (status) {
-    case PutStatus::Ok:
-        // nice!
-        break;
-    case PutStatus::Error_TotalSizeExceeded:
-        break; // TODO: Handle
-    case PutStatus::Error_TotalCountExceeded:
-        break; // TODO: Handle
-    }
-
-    // spdlog::info("Put {} bytes for key \"{}\"", value_size, std::string_view(reinterpret_cast<char*>(key.data()), key.size()));
-    //  for PUT and GET we return the cached value
-
-    // write the same header, no need to recompute it
-    // asio::write(client, asio::buffer(value_size_header), ec);
-    // if (ec) {
-    //     spdlog::error("Failed to write value size header back after PUT: {}", ec.message());
-    //     return;
-    // }
-    // // write the value akin to get
-    // asio::write(client, asio::buffer(value.data(), value.size()), ec);
-    // if (ec) {
-    //     spdlog::error("Failed to write value back after PUT: {}", ec.message());
-    //     return;
-    // }
 
     auto status_raw = static_cast<uint8_t>(status);
-
     asio::write(client, asio::buffer(&status_raw, 1), ec);
     if (ec) {
         spdlog::error("Failed to write status after PUT: {}", ec.message());
