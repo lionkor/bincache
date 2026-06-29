@@ -31,6 +31,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE spdlog absl::flat_hash_map)
 add_executable(${PROJECT_NAME}_tests
     src/cache.cpp
     src/cache.test.cpp
+    src/ndi_array.test.cpp
 )
 target_compile_options(${PROJECT_NAME}_tests PRIVATE -Wall -Wextra --pedantic -fdiagnostics-color=always)
 target_include_directories(${PROJECT_NAME}_tests PRIVATE vendor/asio/include)
