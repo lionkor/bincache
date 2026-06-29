@@ -4,11 +4,13 @@
 #include "ndi_array.hpp"
 #include <algorithm>
 #include <array>
+#include <asio/basic_stream_socket.hpp>
 #include <asio/buffer.hpp>
 #include <asio/error_code.hpp>
 #include <asio/io_context.hpp>
 #include <asio/ip/address.hpp>
 #include <asio/ip/tcp.hpp>
+#include <asio/local/stream_protocol.hpp>
 #include <asio/post.hpp>
 #include <asio/read.hpp> // IWYU pragma: keep
 #include <asio/socket_base.hpp>
@@ -20,14 +22,17 @@
 #include <cstring>
 #include <span>
 #include <spdlog/spdlog.h>
+#include <string_view>
 #include <system_error>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
 using namespace asio;
 
 // Because we're SO nice!!!
-void gracefully_close(ip::tcp::socket& client) {
+template <typename T>
+void gracefully_close(basic_stream_socket<T>& client) {
     asio::error_code ec;
     ec = client.shutdown(asio::socket_base::shutdown_both, ec);
     if (ec) {
@@ -48,7 +53,8 @@ static constexpr std::array<std::byte, OPERATION_SIZE> OPERATION_PUT = { std::by
 
 static BinCache s_cache { };
 
-static inline void do_get(ip::tcp::socket& client, std::vector<std::byte>& key) {
+template <typename T>
+static inline void do_get(basic_stream_socket<T>& client, std::vector<std::byte>& key) {
     asio::error_code ec;
     // PERF: This is the copying variant.
     auto maybe_data = s_cache.get(key);
@@ -96,7 +102,8 @@ static inline void do_get(ip::tcp::socket& client, std::vector<std::byte>& key) 
     }
 }
 
-static inline void do_put(ip::tcp::socket& client, std::vector<std::byte>& key) {
+template <typename T>
+static inline void do_put(basic_stream_socket<T>& client, std::vector<std::byte>& key) {
     asio::error_code ec;
     std::array<std::byte, VALUE_HEADER_SIZE> value_size_header { };
     asio::read(client, asio::buffer(value_size_header), ec);
@@ -122,7 +129,7 @@ static inline void do_put(ip::tcp::socket& client, std::vector<std::byte>& key) 
     }
 
     // PERF: these are two copies, key can be moved if needed
-    PutStatus status = s_cache.put(key, value);
+    PutStatus status = s_cache.put(std::move(key), std::move(value));
     switch (status) {
     case PutStatus::Ok:
         // nice!
@@ -137,15 +144,23 @@ static inline void do_put(ip::tcp::socket& client, std::vector<std::byte>& key) 
     //  for PUT and GET we return the cached value
 
     // write the same header, no need to recompute it
-    asio::write(client, asio::buffer(value_size_header), ec);
+    // asio::write(client, asio::buffer(value_size_header), ec);
+    // if (ec) {
+    //     spdlog::error("Failed to write value size header back after PUT: {}", ec.message());
+    //     return;
+    // }
+    // // write the value akin to get
+    // asio::write(client, asio::buffer(value.data(), value.size()), ec);
+    // if (ec) {
+    //     spdlog::error("Failed to write value back after PUT: {}", ec.message());
+    //     return;
+    // }
+
+    auto status_raw = static_cast<uint8_t>(status);
+
+    asio::write(client, asio::buffer(&status_raw, 1), ec);
     if (ec) {
-        spdlog::error("Failed to write value size header back after PUT: {}", ec.message());
-        return;
-    }
-    // write the value akin to get
-    asio::write(client, asio::buffer(value.data(), value.size()), ec);
-    if (ec) {
-        spdlog::error("Failed to write value back after PUT: {}", ec.message());
+        spdlog::error("Failed to write status after PUT: {}", ec.message());
         return;
     }
 }
@@ -156,7 +171,8 @@ static inline void do_put(ip::tcp::socket& client, std::vector<std::byte>& key) 
 // 2. Key as a byte[] of length read from 1.
 // 3. For PUT, a 4-byte unsigned int, little endian, denoting data size
 // 4. For PUT, data of size read from 3.
-void handle(ip::tcp::socket& client) {
+template <typename T>
+void handle(basic_stream_socket<T>& client) {
     const DeferredAction defer_graceful_close([&client] { gracefully_close(client); });
 
     std::error_code ec;
@@ -199,17 +215,56 @@ void handle(ip::tcp::socket& client) {
     }
 }
 
+void run_unix_server();
+void run_tcp_server();
+
 int main(int argc, char** argv) {
     (void)argc;
-    (void)argv;
 
+    if (argc > 1 && std::string_view(argv[1]) == std::string_view("unix")) {
+        run_unix_server();
+    } else {
+        run_tcp_server();
+    }
+}
+
+void run_unix_server() {
+    asio::io_context io;
+    asio::error_code ec;
+
+    const char* socket_file = "/tmp/bincache.socket";
+    (void)::unlink(socket_file);
+
+    local::stream_protocol::endpoint ep(socket_file);
+    local::stream_protocol::acceptor acceptor(io, ep);
+
+    spdlog::info("Listening on \"{}\" (unix socket)", acceptor.local_endpoint().path());
+
+    asio::thread_pool worker_pool(MAX_CONCURRENCY);
+
+    while (true) {
+        local::stream_protocol::socket client(io);
+        ec = acceptor.accept(client, ec);
+
+        if (ec) {
+            spdlog::error("Accept failed: {}", ec.message());
+            continue;
+        }
+
+        // this is ~25% faster than just calling handle() directly here.
+        asio::post(worker_pool, [client = std::move(client)] mutable { handle(client); });
+    }
+}
+
+void run_tcp_server() {
     asio::io_context io;
     ip::tcp::acceptor acceptor(io, ip::tcp::endpoint(ip::make_address("127.0.0.1"), 3900));
 
     asio::error_code ec;
     ec = acceptor.set_option(ip::tcp::acceptor::reuse_address(true), ec);
-    if (ec)
+    if (ec) {
         spdlog::warn("Failed to set REUSEADDR, ignoring");
+    }
 
     acceptor.listen();
     spdlog::info("Listening on [{}]:{}", acceptor.local_endpoint().address().to_string(), acceptor.local_endpoint().port());

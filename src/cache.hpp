@@ -64,9 +64,9 @@ struct CacheConfig final {
 };
 
 enum class PutStatus : uint8_t {
-    Ok,
-    Error_TotalSizeExceeded,
-    Error_TotalCountExceeded,
+    Ok = 0,
+    Error_TotalSizeExceeded = 1,
+    Error_TotalCountExceeded = 2,
 };
 
 class BinCache final {
