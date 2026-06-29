@@ -1,0 +1,91 @@
+BINCACHE PROTOCOL
+
+Version: 1.0.0 Date: 2026-06-29 Repository: https://github.com/lionkor/bincache
+
+1. Transport
+
+The protocol is transport-agnostic, however two transports are supported in the
+reference implementation: TCP and Unix sockets.
+
+1.1. TCP
+
+The TCP reference implementation listens on port 38126.
+
+1.2. Unix
+
+The Unix sockets reference implementation creates a socket at
+`/tmp/bincache.socket`.
+
+2. Storage and Retrieval
+
+The protocol is binary. All numeric values outside of the `key` and `value` data
+fields are little-endian. There is no sentinel value to delimit parts of the
+protocol, instead every field is either fixed-size, or prefixed with the size
+(little-endian, unsigned). Requests always begin with the following header:
+
+    [ OPERATION (3) ] [ KEY SIZE (2) ] [ KEY DATA (n) ]
+
+- OPERATION: Either `PUT` or `GET`, `PUT` stores a value and `GET` retrieves a
+value. 3 bytes, without a null-terminator.
+- KEY SIZE: 2 bytes little-endian unsigned, denotes the length of the subsequent
+KEY field in bytes.
+- KEY DATA: `KEY SIZE` bytes of raw binary data with no specific encoding or
+format.
+
+2.1. GET operation
+
+  2.1.1. GET Request
+
+    The request consists only of the header, which can be found under 2., but is
+    reproduced below:
+
+    [ OPERATION (3) ] [ KEY SIZE (2) ] [ KEY DATA ]
+
+  2.1.2. GET Response
+
+    The response begins with a status byte:
+
+    [ GET STATUS (1) ]
+
+    Which is:
+    - 0: OK, value follows.
+    - 1: ERROR, not found.
+
+    If the GET STATUS is `0` (OK), it is followed by:
+
+    [ VALUE SIZE (4) ] [ VALUE DATA ]
+
+    If the GET STATUS is not `0`, denoting an error, it is followed by:
+
+    [ ZEROES (4) ]
+
+    Where ZEROES is simply 4 zero bytes.
+
+2.2. PUT operation
+
+  2.2.1. PUT Request
+
+    The PUT request begins with the header, which is reproduced below:
+
+    [ OPERATION (3) ] [ KEY SIZE (2) ] [ KEY DATA ]
+
+    Followed immediately by a value to store:
+
+    [ VALUE SIZE (4) ] [ VALUE DATA ]
+
+  2.2.2. PUT Response
+
+    The PUT response consists of only a status code. The server avoids
+    re-sending the data it just stored, because a status code of `0` guarantees
+    that the PUT call was successful and the value is stored as it was sent:
+
+    [ PUT STATUS (1) ]
+
+    The PUT STATUS is:
+    - 0: OK, stored.
+    - 1: ERROR, out of memory (cache space).
+    - 2: ERROR, too many items cached.
+
+    Note however that a non-zero PUT status does not mean the PUT has failed.
+    The implementation may allow the value to be stored regardless of these
+    limits.

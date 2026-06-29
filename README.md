@@ -1,24 +1,30 @@
-# configure
+# bincache
+
+A fast, binary key-value cache.
+
+See [the protocol](PROTOCOL.txt) specification.
+
+### configure
 ```
 cmake -B build -G Ninja
 ```
 
-# build (includes tests)
+### build (includes tests)
 ```
 cmake --build build --parallel
 ```
 
-# build tests only
+### build tests only
 ```
 cmake --build build --target bincache_tests
 ```
 
-# run tests
+### run tests
 ```
 ctest --test-dir build --output-on-failure
 ```
 
-# or run the test binary directly
+### or run the test binary directly
 ```
 ./build/bincache_tests
 ```
